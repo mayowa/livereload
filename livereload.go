@@ -20,8 +20,8 @@ func Reload() {
 	}()
 }
 
-func HandleServerMux(mux *http.ServeMux, logger Logger) {
-	reloader := &ReloadServer{}
+func HandleServerMux(mux *http.ServeMux, options *Options) {
+	reloader := &ReloadServer{Options: options}
 	mux.Handle(HandlerPath, reloader)
 }
 
@@ -31,24 +31,40 @@ type Logger interface {
 }
 
 type ReloadServer struct {
-	Log Logger
+	Options *Options
 }
 
 func (s *ReloadServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.Log == nil {
-		s.Log = dummyLogger{}
+	if s.Options.Logger == nil {
+		s.Options.Logger = dummyLogger{}
 	}
 
-	err := ReloadHandler(w, r, s.Log)
+	err := ReloadHandler(w, r, s.Options)
 	if err != nil {
-		s.Log.Error()
+		s.Options.Logger.Error()
 	}
 }
 
-func ReloadHandler(w http.ResponseWriter, r *http.Request, logger Logger) error {
+type Options struct {
+	Logger Logger
+	Files  []*FileInfo
+}
+
+func ReloadHandler(w http.ResponseWriter, r *http.Request, options *Options) error {
+	if options == nil {
+		options = &Options{}
+	}
+
 	quit := false
-	if logger == nil {
-		logger = dummyLogger{}
+	logr := options.Logger
+	if logr == nil {
+		logr = dummyLogger{}
+	}
+
+	if len(options.Files) > 0 {
+		// watch for modified files
+		fw := NewFileWatcher(options.Files)
+		go fw.Run(r.Context(), inbox)
 	}
 
 	ws, err := upgrader.Upgrade(w, r, nil)
@@ -64,21 +80,21 @@ func ReloadHandler(w http.ResponseWriter, r *http.Request, logger Logger) error 
 		case msg := <-inbox:
 			err = ws.WriteMessage(websocket.TextMessage, []byte(msg))
 			if err != nil {
-				logger.Error(fmt.Errorf("writeMessage: %w", err))
+				logr.Error(fmt.Errorf("writeMessage: %w", err))
 			}
 		case <-r.Context().Done():
-			logger.Info("done")
+			logr.Info("done")
 			quit = true
 			break
 
 		default:
 			_, in, err := ws.ReadMessage()
 			if err != nil {
-				logger.Error(fmt.Errorf("readMessage: %w", err))
+				logr.Error(fmt.Errorf("readMessage: %w", err))
 				quit = true
 				break
 			}
-			logger.Info(string(in))
+			logr.Info(string(in))
 		}
 	}
 
