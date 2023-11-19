@@ -28,9 +28,6 @@ func NewFileWatcher(files []*FileInfo) *FileWatcher {
 }
 
 func (w *FileWatcher) AddFile(name string, delay time.Duration) {
-	w.mtx.Lock()
-	defer w.mtx.Unlock()
-
 	w.files = append(w.files, &FileInfo{Name: name, Delay: delay})
 }
 func (w *FileWatcher) isModified(file *FileInfo) bool {
@@ -47,6 +44,7 @@ func (w *FileWatcher) isModified(file *FileInfo) bool {
 	diff := fi.ModTime().Sub(file.LastModified)
 	file.LastModified = fi.ModTime()
 	if diff > file.Delay {
+		// log.Println("modified! file:", file.Name, "modTime:", fi.ModTime(), "dif:", diff)
 		return true
 	}
 
@@ -54,8 +52,6 @@ func (w *FileWatcher) isModified(file *FileInfo) bool {
 }
 
 func (w *FileWatcher) filesHaveBeenModified() bool {
-	w.mtx.RLock()
-	defer w.mtx.RUnlock()
 
 	for i := range w.files {
 		if w.isModified(w.files[i]) {

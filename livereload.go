@@ -2,7 +2,9 @@ package livereload
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -11,10 +13,11 @@ var HandlerPath = "/__livereload__"
 
 var (
 	upgrader = websocket.Upgrader{}
-	inbox    = make(chan string)
+	inbox    = make(chan string, 2)
 )
 
 func Reload() {
+
 	go func() {
 		inbox <- "reload"
 	}()
@@ -67,38 +70,54 @@ func ReloadHandler(w http.ResponseWriter, r *http.Request, options *Options) err
 		go fw.Run(r.Context(), inbox)
 	}
 
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return err
-	}
-	defer ws.Close()
-
-	ws.SetReadLimit(512)
+	lastPing := time.Now()
+	logr.Info("[livereload] listening")
 
 	for !quit {
 		select {
-		case msg := <-inbox:
-			err = ws.WriteMessage(websocket.TextMessage, []byte(msg))
-			if err != nil {
-				logr.Error(fmt.Errorf("writeMessage: %w", err))
-			}
 		case <-r.Context().Done():
-			logr.Info("done")
+			logr.Info("[livereload] context.Done")
 			quit = true
 			break
+		case msg := <-inbox:
+			log.Println("lr: reload received")
+			sendMessage(w, "", msg)
+			log.Println("lr: reload sent")
 
 		default:
-			_, in, err := ws.ReadMessage()
-			if err != nil {
-				logr.Error(fmt.Errorf("readMessage: %w", err))
-				quit = true
-				break
+			if time.Now().Sub(lastPing) >= time.Second*10 {
+				lastPing = time.Now()
+				keepAlive(w)
 			}
-			logr.Info(string(in))
 		}
 	}
 
 	return nil
+}
+
+func keepAlive(w http.ResponseWriter) {
+	sendMessage(w, "", "ping")
+}
+
+func sendMessage(w http.ResponseWriter, event, data string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+
+	if event != "" {
+		fmt.Fprint(w, "event:", event, "\n")
+	} else if event == ":" {
+		fmt.Fprint(w, ":", event, "\n")
+	}
+
+	if event != ":" {
+		fmt.Fprint(w, "data:", data, "\n")
+		// fmt.Fprintln(w, "retry:", 500)
+	}
+
+	fmt.Fprint(w, "\n\n")
+
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 type dummyLogger struct{}

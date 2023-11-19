@@ -1,42 +1,31 @@
-function newConnection(ws) {
-	let loc = window.location
-	let url = (loc.protocol === 'https:') ? 'wss:': 'ws:'
-	url += `//${loc.host}/__livereload__`
+function newConnection() {
+	let url = `/__livereload__`
 
-	ws = new WebSocket(url)
+	let ws = new EventSource(url)
 	let intervalHandle = 0
 
 	ws.onopen = function() {
-		console.log('livereload: connected')
-	}
-
-	ws.onmessage = function(evt) {
-		console.log(evt.data)
-		if (evt.data === 'reload') {
-			window.location.reload()
-		}
+		console.log('[livereload] connected')
 	}
 
 	ws.onclose = function(event) {
-		console.log('livereload: connection died')
-
-		clearInterval(intervalHandle)
-		ws.close()
-		setTimeout(function() {
-			newConnection(ws)
-		}, 1000)
+		console.log('[livereload] connection died')
 	}
 
-	ws.onerror = function(error) {
-		console.log(`livereload: connection error`)
+	ws.onerror = function(ev, err) {
+		console.log(`[livereload] error`, err)
 	}
-
-	intervalHandle = setInterval(function() {
-		ws.send('livereload: ping')
-	}, 20000)
 
 	return ws
 }
 
-let ws = null
-newConnection(ws)
+let ws = newConnection()
+ws.addEventListener("message", (evt) => {
+	let msg = evt.data
+	console.log("message:", msg)
+	if (msg === 'reload') {
+		ws.close()
+		window.location.reload()
+		console.log("window.reload")
+	}
+})
